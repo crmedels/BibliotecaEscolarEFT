@@ -1,0 +1,3 @@
+db.url=jdbc:mysql://localhost:3306/biblioteca?connectTimeout=5000&socketTimeout=15000
+db.usuario=root
+db.contrasena=
