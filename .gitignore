@@ -1,0 +1,19 @@
+### IntelliJ IDEA ###
+.idea/
+out/
+
+### Archivos generados ###
+build/
+dist/
+*.class
+*.log
+*.tmp
+*.zip
+*.rar
+
+### Configuracion local de MySQL ###
+/config/basedatos.properties
+
+### Sistema operativo ###
+.DS_Store
+Thumbs.db
