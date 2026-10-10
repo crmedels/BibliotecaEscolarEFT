@@ -5,8 +5,10 @@ import cl.biblioteca.modelo.Libro;
 import cl.biblioteca.modelo.SesionUsuario;
 import cl.biblioteca.servicio.CategoriaServicio;
 import cl.biblioteca.servicio.LibroServicio;
+import cl.biblioteca.util.ManejadorErrores;
 import cl.biblioteca.util.TareaBD;
 import cl.biblioteca.util.Validador;
+import cl.biblioteca.vista.DialogoLibro;
 import cl.biblioteca.vista.VentanaLibros;
 
 import javax.swing.JOptionPane;
@@ -16,7 +18,7 @@ import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 
 /**
- * Coordina la gestión de libros y la consulta del catálogo en segundo plano.
+ * Coordina el catálogo y el formulario de libros con operaciones en segundo plano.
  */
 public final class ControladorLibros {
 
@@ -25,22 +27,29 @@ public final class ControladorLibros {
     private final CategoriaServicio categoriaServicio;
     private final boolean administrador;
     private final String estadoInicial;
+
+    private List<Categoria> categorias = List.of();
     private String estado;
     private String mensajeCambioPendiente;
 
     public ControladorLibros(VentanaLibros ventana, SesionUsuario sesion) {
-        this.ventana = Objects.requireNonNull(ventana, "La ventana es obligatoria.");
+        this.ventana = Objects.requireNonNull(
+                ventana, "La ventana es obligatoria."
+        );
+
         libroServicio = new LibroServicio(sesion);
         categoriaServicio = new CategoriaServicio(sesion);
         administrador = sesion.puedeAdministrar();
+
         estadoInicial = administrador
-                ? "Seleccione un libro para editarlo, o pulse Nuevo."
+                ? "Pulse Nuevo libro o seleccione uno para editarlo."
                 : "Seleccione un libro para consultar sus datos.";
+
         estado = estadoInicial;
 
         if (administrador) {
-            ventana.alNuevo(evento -> nuevo());
-            ventana.alGuardar(evento -> guardar());
+            ventana.alNuevo(evento -> abrirFormulario(null));
+            ventana.alEditar(evento -> editar());
             ventana.alEliminar(evento -> eliminar());
         }
 
@@ -58,15 +67,43 @@ public final class ControladorLibros {
         ventana.setVisible(true);
     }
 
-    private void nuevo() {
+    private void editar() {
         if (!administrador || !estaDisponible()) {
             return;
         }
 
-        ventana.limpiarFormulario();
-        estado = "Complete los datos del nuevo libro y pulse Guardar.";
-        ventana.establecerOcupada(false, estado);
-        ventana.enfocarTitulo();
+        Libro seleccionado = ventana.getLibroSeleccionado();
+
+        if (seleccionado != null) {
+            abrirFormulario(seleccionado);
+        }
+    }
+
+    private void abrirFormulario(Libro libro) {
+        if (!administrador || !estaDisponible()) {
+            return;
+        }
+
+        DialogoLibro dialogo = null;
+        ventana.establecerOcupada(true, "Formulario de libro abierto.");
+
+        try {
+            dialogo = new DialogoLibro(ventana, categorias, libro);
+
+            DialogoLibro formulario = dialogo;
+            formulario.alGuardar(evento -> guardar(formulario));
+            formulario.setVisible(true);
+
+        } catch (RuntimeException e) {
+            ManejadorErrores.mostrar(ventana, e);
+
+        } finally {
+            if (dialogo != null) {
+                dialogo.dispose();
+            }
+
+            finalizarTarea();
+        }
     }
 
     private void seleccionarLibro() {
@@ -74,46 +111,76 @@ public final class ControladorLibros {
             return;
         }
 
-        ventana.mostrarLibroSeleccionado();
         estado = ventana.getLibroSeleccionado() == null ? estadoInicial
-                : administrador ? "Edite los datos y pulse Guardar para actualizar el libro."
+                : administrador ? "Pulse Editar libro para modificar el libro seleccionado."
                   : "Consulta del libro seleccionado.";
+
         ventana.establecerOcupada(false, estado);
     }
 
-    private void guardar() {
-        if (!administrador || !estaDisponible()) {
+    private void guardar(DialogoLibro formulario) {
+        if (!administrador || !formulario.isDisplayable() || formulario.estaOcupada()) {
             return;
         }
 
-        Libro seleccionado = ventana.getLibroSeleccionado();
-        int id = seleccionado == null ? 0 : seleccionado.getId();
-        int stockOriginal = seleccionado == null ? 0 : seleccionado.getStock();
+        int id = formulario.getIdLibro();
+        int stockOriginal = formulario.getStockOriginal();
 
-        String titulo = ventana.getTitulo();
-        String autor = ventana.getAutor();
-        String isbn = ventana.getIsbn();
-        String editorial = ventana.getEditorial();
-        String textoStock = ventana.getStock();
+        String titulo = formulario.getTitulo();
+        String autor = formulario.getAutor();
+        String isbn = formulario.getIsbn();
+        String editorial = formulario.getEditorial();
+        String textoStock = formulario.getStock();
 
-        Categoria seleccion = ventana.getCategoriaSeleccionada();
+        Categoria seleccion = formulario.getCategoriaSeleccionada();
         Categoria categoria = seleccion == null ? null
                 : new Categoria(seleccion.getId(), seleccion.getNombre());
 
-        ejecutarCambio(
-                "Guardando libro...",
-                () -> {
-                    int stock = Validador.validarStock(textoStock);
-                    Libro datos = new Libro(
-                            id, titulo, autor, isbn, editorial, stock, categoria
-                    );
+        formulario.establecerOcupada(true, "Guardando libro...");
 
-                    return id > 0
-                            ? libroServicio.actualizar(datos, stockOriginal)
-                            : libroServicio.guardar(datos);
-                },
-                id > 0 ? "Libro actualizado." : "Libro creado."
-        );
+        try {
+            new TareaBD<Libro>(
+                    formulario,
+                    () -> {
+                        int stock = Validador.validarStock(textoStock);
+
+                        Libro datos = new Libro(
+                                id, titulo, autor, isbn, editorial, stock, categoria
+                        );
+
+                        return id > 0
+                                ? libroServicio.actualizar(datos, stockOriginal)
+                                : libroServicio.guardar(datos);
+                    },
+                    resultado -> {
+                        String mensaje = id > 0
+                                ? "Libro actualizado."
+                                : "Libro creado.";
+
+                        estado = mensaje
+                                + " Pulse Recargar para actualizar el catálogo.";
+
+                        mensajeCambioPendiente = mensaje;
+                        formulario.dispose();
+                    },
+                    () -> finalizarGuardado(formulario)
+            ).execute();
+
+        } catch (RuntimeException e) {
+            ManejadorErrores.mostrar(formulario, e);
+            finalizarGuardado(formulario);
+        }
+    }
+
+    private void finalizarGuardado(DialogoLibro formulario) {
+        if (formulario.isDisplayable()) {
+            formulario.establecerOcupada(
+                    false,
+                    "Revise los datos e intente guardar nuevamente."
+            );
+
+            formulario.enfocarTitulo();
+        }
     }
 
     private void eliminar() {
@@ -122,9 +189,11 @@ public final class ControladorLibros {
         }
 
         Libro seleccionado = ventana.getLibroSeleccionado();
+
         if (seleccionado == null) {
             return;
         }
+
         int id = seleccionado.getId();
 
         int respuesta = JOptionPane.showConfirmDialog(
@@ -152,11 +221,16 @@ public final class ControladorLibros {
     private void cargarCatalogo(String mensajeExito) {
         ejecutarTarea(
                 "Cargando catálogo...",
-                () -> new DatosCatalogo(categoriaServicio.listar(), libroServicio.listar()),
+                () -> new DatosCatalogo(
+                        categoriaServicio.listar(),
+                        libroServicio.listar()
+                ),
                 datos -> {
-                    ventana.mostrarCategorias(datos.categorias());
+                    categorias = List.copyOf(datos.categorias());
                     ventana.mostrarLibros(datos.libros());
-                    estado = mensajeExito + " Libros: " + datos.libros().size() + ".";
+
+                    estado = mensajeExito
+                            + " Libros: " + datos.libros().size() + ".";
                 }
         );
     }
@@ -170,9 +244,11 @@ public final class ControladorLibros {
                     return null;
                 },
                 resultado -> {
-                    ventana.limpiarFormulario();
-                    estado = mensajeExito + " Pulse Recargar para actualizar el catálogo.";
+                    estado = mensajeExito
+                            + " Pulse Recargar para actualizar el catálogo.";
+
                     mensajeCambioPendiente = mensajeExito;
+                    ventana.limpiarSeleccion();
                 }
         );
     }
@@ -184,16 +260,23 @@ public final class ControladorLibros {
         }
 
         ventana.establecerOcupada(true, mensaje);
-        new TareaBD<T>(
-                ventana,
-                operacion,
-                resultado -> {
-                    if (ventana.isDisplayable()) {
-                        alCompletar.accept(resultado);
-                    }
-                },
-                this::finalizarTarea
-        ).execute();
+
+        try {
+            new TareaBD<T>(
+                    ventana,
+                    operacion,
+                    resultado -> {
+                        if (ventana.isDisplayable()) {
+                            alCompletar.accept(resultado);
+                        }
+                    },
+                    this::finalizarTarea
+            ).execute();
+
+        } catch (RuntimeException e) {
+            ManejadorErrores.mostrar(ventana, e);
+            finalizarTarea();
+        }
     }
 
     private void finalizarTarea() {
@@ -209,7 +292,7 @@ public final class ControladorLibros {
         if (mensajePendiente != null) {
             cargarCatalogo(mensajePendiente);
         } else {
-            ventana.enfocarTitulo();
+            ventana.enfocarTabla();
         }
     }
 
