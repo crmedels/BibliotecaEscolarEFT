@@ -237,17 +237,25 @@ public final class VentanaPrestamos extends JDialog {
 
     public void mostrarPrestamos(List<Prestamo> datos) {
         tabla.clearSelection();
+        tabla.getSelectionModel().setAnchorSelectionIndex(-1);
+        tabla.getSelectionModel().setLeadSelectionIndex(-1);
+
         prestamos = List.copyOf(datos);
         modeloTabla.setRowCount(0);
+
         for (Prestamo prestamo : prestamos) {
             Estudiante estudiante = prestamo.getEstudiante();
             Libro libro = prestamo.getLibro();
+
             modeloTabla.addRow(new Object[]{
-                    prestamo.getId(), estudiante == null ? "" : estudiante.getNombre(),
+                    prestamo.getId(),
+                    estudiante == null ? "" : estudiante.getNombre(),
                     estudiante == null ? "" : estudiante.getRut(),
                     libro == null ? "" : libro.getTitulo(),
-                    prestamo.getFechaPrestamo(), prestamo.getFechaDevolucion(),
-                    prestamo.getFechaDevolucionReal(), obtenerEstado(prestamo)
+                    prestamo.getFechaPrestamo(),
+                    prestamo.getFechaDevolucion(),
+                    prestamo.getFechaDevolucionReal(),
+                    obtenerEstado(prestamo)
             });
         }
         actualizarControles();
