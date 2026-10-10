@@ -5,6 +5,7 @@ import cl.biblioteca.modelo.SesionUsuario;
 import cl.biblioteca.util.ManejadorErrores;
 import cl.biblioteca.util.TareaBD;
 import cl.biblioteca.vista.VentanaCategorias;
+import cl.biblioteca.vista.VentanaEstudiantes;
 import cl.biblioteca.vista.VentanaLibros;
 import cl.biblioteca.vista.VentanaPrincipal;
 
@@ -42,6 +43,7 @@ public final class ControladorPrincipal {
 
         if (sesion.puedeAdministrar()) {
             ventana.alCategorias(evento -> abrirCategorias());
+            ventana.alEstudiantes(evento -> abrirEstudiantes());
         }
     }
 
@@ -97,6 +99,36 @@ public final class ControladorPrincipal {
                 controlador.mostrar();
             } finally {
                 ventanaCategorias.dispose();
+            }
+
+        } catch (RuntimeException error) {
+            ManejadorErrores.mostrar(ventana, error);
+
+        } finally {
+            if (ventana.isDisplayable()) {
+                ventana.establecerOcupada(false, ESTADO_INICIAL);
+            }
+        }
+    }
+
+    private void abrirEstudiantes() {
+        if (!estaDisponible()) {
+            return;
+        }
+
+        try {
+            sesion.exigirAdministracion();
+            ventana.establecerOcupada(true, "Gestionando estudiantes...");
+
+            VentanaEstudiantes ventanaEstudiantes = new VentanaEstudiantes(ventana);
+
+            try {
+                ControladorEstudiantes controlador = new ControladorEstudiantes(
+                        ventanaEstudiantes, sesion
+                );
+                controlador.mostrar();
+            } finally {
+                ventanaEstudiantes.dispose();
             }
 
         } catch (RuntimeException error) {
