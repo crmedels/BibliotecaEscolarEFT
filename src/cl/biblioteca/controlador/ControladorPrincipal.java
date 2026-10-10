@@ -9,6 +9,7 @@ import cl.biblioteca.vista.VentanaEstudiantes;
 import cl.biblioteca.vista.VentanaLibros;
 import cl.biblioteca.vista.VentanaPrestamos;
 import cl.biblioteca.vista.VentanaPrincipal;
+import cl.biblioteca.vista.VentanaReportes;
 
 import java.util.Objects;
 
@@ -38,6 +39,7 @@ public final class ControladorPrincipal {
 
         ventana.alLibros(evento -> abrirLibros());
         ventana.alPrestamos(evento -> abrirPrestamos());
+        ventana.alReportes(evento -> abrirReportes());
         ventana.alCerrarSesion(evento -> cerrar(true));
         ventana.alSalir(() -> cerrar(false));
         if (sesion.puedeAdministrar()) {
@@ -147,6 +149,33 @@ public final class ControladorPrincipal {
                 controlador.mostrar();
             } finally {
                 ventanaPrestamos.dispose();
+            }
+        } catch (RuntimeException error) {
+            ManejadorErrores.mostrar(ventana, error);
+        } finally {
+            if (ventana.isDisplayable()) {
+                ventana.establecerOcupada(false, ESTADO_INICIAL);
+            }
+        }
+    }
+
+    private void abrirReportes() {
+        if (!estaDisponible()) {
+            return;
+        }
+
+        try {
+            ventana.establecerOcupada(true, sesion.puedeAdministrar()
+                    ? "Consultando reportes..." : "Consultando mi historial...");
+
+            VentanaReportes ventanaReportes = new VentanaReportes(ventana, sesion);
+            try {
+                ControladorReportes controlador = new ControladorReportes(
+                        ventanaReportes, sesion
+                );
+                controlador.mostrar();
+            } finally {
+                ventanaReportes.dispose();
             }
         } catch (RuntimeException error) {
             ManejadorErrores.mostrar(ventana, error);
