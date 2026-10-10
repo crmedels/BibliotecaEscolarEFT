@@ -7,6 +7,7 @@ import cl.biblioteca.util.TareaBD;
 import cl.biblioteca.vista.VentanaCategorias;
 import cl.biblioteca.vista.VentanaEstudiantes;
 import cl.biblioteca.vista.VentanaLibros;
+import cl.biblioteca.vista.VentanaPrestamos;
 import cl.biblioteca.vista.VentanaPrincipal;
 
 import java.util.Objects;
@@ -27,20 +28,18 @@ public final class ControladorPrincipal {
     public ControladorPrincipal(VentanaPrincipal ventana, SesionUsuario sesion,
                                 Runnable alCerrarSesion) {
         this.ventana = Objects.requireNonNull(ventana, "La ventana es obligatoria.");
-
         if (sesion == null) {
             throw new IllegalStateException("Debe iniciar sesión para utilizar el sistema.");
         }
-
         this.sesion = sesion;
         this.alCerrarSesion = Objects.requireNonNull(
                 alCerrarSesion, "La acción para volver al acceso es obligatoria."
         );
 
         ventana.alLibros(evento -> abrirLibros());
+        ventana.alPrestamos(evento -> abrirPrestamos());
         ventana.alCerrarSesion(evento -> cerrar(true));
         ventana.alSalir(() -> cerrar(false));
-
         if (sesion.puedeAdministrar()) {
             ventana.alCategorias(evento -> abrirCategorias());
             ventana.alEstudiantes(evento -> abrirEstudiantes());
@@ -61,7 +60,6 @@ public final class ControladorPrincipal {
                     ? "Gestionando libros..." : "Consultando catálogo...");
 
             VentanaLibros ventanaLibros = new VentanaLibros(ventana, sesion);
-
             try {
                 ControladorLibros controlador = new ControladorLibros(
                         ventanaLibros, sesion
@@ -70,10 +68,8 @@ public final class ControladorPrincipal {
             } finally {
                 ventanaLibros.dispose();
             }
-
         } catch (RuntimeException error) {
             ManejadorErrores.mostrar(ventana, error);
-
         } finally {
             if (ventana.isDisplayable()) {
                 ventana.establecerOcupada(false, ESTADO_INICIAL);
@@ -91,7 +87,6 @@ public final class ControladorPrincipal {
             ventana.establecerOcupada(true, "Gestionando categorías...");
 
             VentanaCategorias ventanaCategorias = new VentanaCategorias(ventana);
-
             try {
                 ControladorCategorias controlador = new ControladorCategorias(
                         ventanaCategorias, sesion
@@ -100,10 +95,8 @@ public final class ControladorPrincipal {
             } finally {
                 ventanaCategorias.dispose();
             }
-
         } catch (RuntimeException error) {
             ManejadorErrores.mostrar(ventana, error);
-
         } finally {
             if (ventana.isDisplayable()) {
                 ventana.establecerOcupada(false, ESTADO_INICIAL);
@@ -121,7 +114,6 @@ public final class ControladorPrincipal {
             ventana.establecerOcupada(true, "Gestionando estudiantes...");
 
             VentanaEstudiantes ventanaEstudiantes = new VentanaEstudiantes(ventana);
-
             try {
                 ControladorEstudiantes controlador = new ControladorEstudiantes(
                         ventanaEstudiantes, sesion
@@ -130,10 +122,34 @@ public final class ControladorPrincipal {
             } finally {
                 ventanaEstudiantes.dispose();
             }
-
         } catch (RuntimeException error) {
             ManejadorErrores.mostrar(ventana, error);
+        } finally {
+            if (ventana.isDisplayable()) {
+                ventana.establecerOcupada(false, ESTADO_INICIAL);
+            }
+        }
+    }
 
+    private void abrirPrestamos() {
+        if (!estaDisponible()) {
+            return;
+        }
+
+        try {
+            ventana.establecerOcupada(true, "Consultando préstamos y devoluciones...");
+
+            VentanaPrestamos ventanaPrestamos = new VentanaPrestamos(ventana, sesion);
+            try {
+                ControladorPrestamos controlador = new ControladorPrestamos(
+                        ventanaPrestamos, sesion
+                );
+                controlador.mostrar();
+            } finally {
+                ventanaPrestamos.dispose();
+            }
+        } catch (RuntimeException error) {
+            ManejadorErrores.mostrar(ventana, error);
         } finally {
             if (ventana.isDisplayable()) {
                 ventana.establecerOcupada(false, ESTADO_INICIAL);
