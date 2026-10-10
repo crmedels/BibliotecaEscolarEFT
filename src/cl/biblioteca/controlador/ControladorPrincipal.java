@@ -5,6 +5,7 @@ import cl.biblioteca.modelo.SesionUsuario;
 import cl.biblioteca.util.ManejadorErrores;
 import cl.biblioteca.util.TareaBD;
 import cl.biblioteca.vista.VentanaCategorias;
+import cl.biblioteca.vista.VentanaLibros;
 import cl.biblioteca.vista.VentanaPrincipal;
 
 import java.util.Objects;
@@ -35,6 +36,7 @@ public final class ControladorPrincipal {
                 alCerrarSesion, "La acción para volver al acceso es obligatoria."
         );
 
+        ventana.alLibros(evento -> abrirLibros());
         ventana.alCerrarSesion(evento -> cerrar(true));
         ventana.alSalir(() -> cerrar(false));
 
@@ -45,6 +47,36 @@ public final class ControladorPrincipal {
 
     public void mostrar() {
         ventana.setVisible(true);
+    }
+
+    private void abrirLibros() {
+        if (!estaDisponible()) {
+            return;
+        }
+
+        try {
+            ventana.establecerOcupada(true, sesion.puedeAdministrar()
+                    ? "Gestionando libros..." : "Consultando catálogo...");
+
+            VentanaLibros ventanaLibros = new VentanaLibros(ventana, sesion);
+
+            try {
+                ControladorLibros controlador = new ControladorLibros(
+                        ventanaLibros, sesion
+                );
+                controlador.mostrar();
+            } finally {
+                ventanaLibros.dispose();
+            }
+
+        } catch (RuntimeException error) {
+            ManejadorErrores.mostrar(ventana, error);
+
+        } finally {
+            if (ventana.isDisplayable()) {
+                ventana.establecerOcupada(false, ESTADO_INICIAL);
+            }
+        }
     }
 
     private void abrirCategorias() {
