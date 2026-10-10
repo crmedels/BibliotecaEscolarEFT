@@ -1,8 +1,11 @@
 package cl.biblioteca.controlador;
 
+import cl.biblioteca.modelo.Categoria;
 import cl.biblioteca.modelo.SesionUsuario;
 import cl.biblioteca.servicio.CategoriaServicio;
+import cl.biblioteca.util.ManejadorErrores;
 import cl.biblioteca.util.TareaBD;
+import cl.biblioteca.vista.DialogoCategoria;
 import cl.biblioteca.vista.VentanaCategorias;
 
 import javax.swing.JOptionPane;
@@ -11,25 +14,29 @@ import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 
 /**
- * Coordina el formulario de categorías y las operaciones en segundo plano.
+ * Coordina el listado y el formulario de categorías en segundo plano.
  */
 public final class ControladorCategorias {
 
     private static final String ESTADO_INICIAL =
-            "Seleccione una categoría o pulse Nuevo.";
+            "Pulse Nueva categoría o seleccione una para editarla.";
 
     private final VentanaCategorias ventana;
     private final CategoriaServicio servicio;
+
     private String estado = ESTADO_INICIAL;
     private String mensajeCambioPendiente;
 
     public ControladorCategorias(VentanaCategorias ventana, SesionUsuario sesion) {
-        this.ventana = Objects.requireNonNull(ventana, "La ventana es obligatoria.");
+        this.ventana = Objects.requireNonNull(
+                ventana, "La ventana es obligatoria."
+        );
+
         servicio = new CategoriaServicio(sesion);
         sesion.exigirAdministracion();
 
-        ventana.alNuevo(evento -> nuevo());
-        ventana.alGuardar(evento -> guardar());
+        ventana.alNuevo(evento -> abrirFormulario(null));
+        ventana.alEditar(evento -> editar());
         ventana.alEliminar(evento -> eliminar());
         ventana.alRecargar(evento -> cargarCategorias("Listado actualizado."));
         ventana.alSeleccionar(this::seleccionarCategoria);
@@ -45,15 +52,43 @@ public final class ControladorCategorias {
         ventana.setVisible(true);
     }
 
-    private void nuevo() {
+    private void editar() {
         if (!estaDisponible()) {
             return;
         }
 
-        ventana.limpiarFormulario();
-        estado = "Escriba el nombre de la nueva categoría y pulse Guardar.";
-        ventana.establecerOcupada(false, estado);
-        ventana.enfocarNombre();
+        Categoria seleccionada = ventana.getCategoriaSeleccionada();
+
+        if (seleccionada != null) {
+            abrirFormulario(seleccionada);
+        }
+    }
+
+    private void abrirFormulario(Categoria categoria) {
+        if (!estaDisponible()) {
+            return;
+        }
+
+        DialogoCategoria dialogo = null;
+        ventana.establecerOcupada(true, "Formulario de categoría abierto.");
+
+        try {
+            dialogo = new DialogoCategoria(ventana, categoria);
+
+            DialogoCategoria formulario = dialogo;
+            formulario.alGuardar(evento -> guardar(formulario));
+            formulario.setVisible(true);
+
+        } catch (RuntimeException e) {
+            ManejadorErrores.mostrar(ventana, e);
+
+        } finally {
+            if (dialogo != null) {
+                dialogo.dispose();
+            }
+
+            finalizarTarea();
+        }
     }
 
     private void seleccionarCategoria() {
@@ -61,30 +96,58 @@ public final class ControladorCategorias {
             return;
         }
 
-        ventana.mostrarNombreSeleccionado();
-        estado = ventana.getIdSeleccionado() > 0
-                ? "Edite el nombre y pulse Guardar para actualizar la categoría."
-                : ESTADO_INICIAL;
+        estado = ventana.getCategoriaSeleccionada() == null
+                ? ESTADO_INICIAL
+                : "Pulse Editar categoría para modificar la categoría seleccionada.";
+
         ventana.establecerOcupada(false, estado);
     }
 
-    private void guardar() {
-        if (!estaDisponible()) {
+    private void guardar(DialogoCategoria formulario) {
+        if (!formulario.isDisplayable() || formulario.estaOcupada()) {
             return;
         }
 
-        int id = ventana.getIdSeleccionado();
-        String nombre = ventana.getNombre();
-        String mensajeExito = id > 0
-                ? "Categoría actualizada." : "Categoría creada.";
+        int id = formulario.getIdCategoria();
+        String nombre = formulario.getNombre();
 
-        ejecutarCambio(
-                "Guardando categoría...",
-                () -> id > 0
-                        ? servicio.actualizar(id, nombre)
-                        : servicio.guardar(nombre),
-                mensajeExito
-        );
+        formulario.establecerOcupada(true, "Guardando categoría...");
+
+        try {
+            new TareaBD<Categoria>(
+                    formulario,
+                    () -> id > 0
+                            ? servicio.actualizar(id, nombre)
+                            : servicio.guardar(nombre),
+                    resultado -> {
+                        String mensaje = id > 0
+                                ? "Categoría actualizada."
+                                : "Categoría creada.";
+
+                        estado = mensaje
+                                + " Pulse Recargar para actualizar el listado.";
+
+                        mensajeCambioPendiente = mensaje;
+                        formulario.dispose();
+                    },
+                    () -> finalizarGuardado(formulario)
+            ).execute();
+
+        } catch (RuntimeException e) {
+            ManejadorErrores.mostrar(formulario, e);
+            finalizarGuardado(formulario);
+        }
+    }
+
+    private void finalizarGuardado(DialogoCategoria formulario) {
+        if (formulario.isDisplayable()) {
+            formulario.establecerOcupada(
+                    false,
+                    "Revise el nombre e intente guardar nuevamente."
+            );
+
+            formulario.enfocarNombre();
+        }
     }
 
     private void eliminar() {
@@ -92,10 +155,13 @@ public final class ControladorCategorias {
             return;
         }
 
-        int id = ventana.getIdSeleccionado();
-        if (id <= 0) {
+        Categoria seleccionada = ventana.getCategoriaSeleccionada();
+
+        if (seleccionada == null) {
             return;
         }
+
+        int id = seleccionada.getId();
 
         int respuesta = JOptionPane.showConfirmDialog(
                 ventana,
@@ -104,6 +170,7 @@ public final class ControladorCategorias {
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE
         );
+
         if (respuesta != JOptionPane.YES_OPTION) {
             return;
         }
@@ -124,7 +191,9 @@ public final class ControladorCategorias {
                 servicio::listar,
                 categorias -> {
                     ventana.mostrarCategorias(categorias);
-                    estado = mensajeExito + " Categorías: " + categorias.size() + ".";
+
+                    estado = mensajeExito
+                            + " Categorías: " + categorias.size() + ".";
                 }
         );
     }
@@ -138,9 +207,11 @@ public final class ControladorCategorias {
                     return null;
                 },
                 resultado -> {
-                    ventana.limpiarFormulario();
-                    estado = mensajeExito + " Pulse Recargar para actualizar el listado.";
+                    estado = mensajeExito
+                            + " Pulse Recargar para actualizar el listado.";
+
                     mensajeCambioPendiente = mensajeExito;
+                    ventana.limpiarSeleccion();
                 }
         );
     }
@@ -152,16 +223,23 @@ public final class ControladorCategorias {
         }
 
         ventana.establecerOcupada(true, mensaje);
-        new TareaBD<T>(
-                ventana,
-                operacion,
-                resultado -> {
-                    if (ventana.isDisplayable()) {
-                        alCompletar.accept(resultado);
-                    }
-                },
-                this::finalizarTarea
-        ).execute();
+
+        try {
+            new TareaBD<T>(
+                    ventana,
+                    operacion,
+                    resultado -> {
+                        if (ventana.isDisplayable()) {
+                            alCompletar.accept(resultado);
+                        }
+                    },
+                    this::finalizarTarea
+            ).execute();
+
+        } catch (RuntimeException e) {
+            ManejadorErrores.mostrar(ventana, e);
+            finalizarTarea();
+        }
     }
 
     private void finalizarTarea() {
@@ -173,10 +251,11 @@ public final class ControladorCategorias {
         }
 
         ventana.establecerOcupada(false, estado);
+
         if (mensajePendiente != null) {
             cargarCategorias(mensajePendiente);
         } else {
-            ventana.enfocarNombre();
+            ventana.enfocarTabla();
         }
     }
 

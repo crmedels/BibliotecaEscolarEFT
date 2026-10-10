@@ -10,7 +10,6 @@ import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTable;
-import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingConstants;
 import javax.swing.table.DefaultTableModel;
@@ -19,24 +18,28 @@ import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.GridLayout;
 import java.awt.event.ActionListener;
+import java.awt.event.MouseEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.util.List;
 
 /**
- * Presenta el formulario y el listado de categorías.
+ * Presenta el listado de categorías y sus acciones.
+ * La creación y edición se realizan en un formulario separado.
  */
 public final class VentanaCategorias extends JDialog {
 
-    private final JTextField campoNombre = new JTextField(30);
-    private final JButton botonNuevo = new JButton("Nuevo");
-    private final JButton botonGuardar = new JButton("Guardar");
+    private final JButton botonNuevo = new JButton("Nueva categoría");
+    private final JButton botonEditar = new JButton("Editar categoría");
     private final JButton botonEliminar = new JButton("Eliminar");
     private final JButton botonRecargar = new JButton("Recargar");
     private final JButton botonCerrar = new JButton("Cerrar");
+
     private final JLabel etiquetaEstado = new JLabel(
-            "Seleccione una categoría o pulse Nuevo.", SwingConstants.CENTER
+            "Pulse Nueva categoría o seleccione una para editarla.",
+            SwingConstants.CENTER
     );
+
     private final DefaultTableModel modeloTabla = new DefaultTableModel(
             new Object[]{"ID", "Nombre"}, 0
     ) {
@@ -50,32 +53,52 @@ public final class VentanaCategorias extends JDialog {
             return columna == 0 ? Integer.class : String.class;
         }
     };
-    private final JTable tabla = new JTable(modeloTabla);
+
+    private final JTable tabla = new JTable(modeloTabla) {
+        @Override
+        public String getToolTipText(MouseEvent evento) {
+            int fila = rowAtPoint(evento.getPoint());
+            int columna = columnAtPoint(evento.getPoint());
+
+            if (fila < 0 || columna < 0) {
+                return null;
+            }
+
+            Object valor = getValueAt(fila, columna);
+            return valor == null ? null : valor.toString();
+        }
+    };
+
+    private List<Categoria> categorias = List.of();
     private boolean ocupada;
 
     public VentanaCategorias(JFrame propietario) {
         super(propietario, "Biblioteca Escolar - Categorías", true);
+
         setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
-        setMinimumSize(new Dimension(580, 380));
+        setMinimumSize(new Dimension(760, 420));
 
         tabla.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         tabla.setAutoCreateRowSorter(true);
         tabla.setFillsViewportHeight(true);
         tabla.setRowHeight(24);
+        tabla.setToolTipText("");
+
         tabla.getTableHeader().setReorderingAllowed(false);
         tabla.getColumnModel().getColumn(0).setMaxWidth(80);
+
         tabla.getSelectionModel().addListSelectionListener(evento -> {
             if (!evento.getValueIsAdjusting()) {
                 actualizarControles();
             }
         });
 
+        JScrollPane listado = new JScrollPane(tabla);
+        listado.setPreferredSize(new Dimension(780, 300));
+
         JPanel contenido = new JPanel(new BorderLayout(0, 16));
         contenido.setBorder(BorderFactory.createEmptyBorder(18, 18, 18, 18));
-        contenido.add(crearFormulario(), BorderLayout.NORTH);
-
-        JScrollPane listado = new JScrollPane(tabla);
-        listado.setPreferredSize(new Dimension(600, 260));
+        contenido.add(new JLabel("Listado de categorías"), BorderLayout.NORTH);
         contenido.add(listado, BorderLayout.CENTER);
         contenido.add(crearPie(), BorderLayout.SOUTH);
 
@@ -85,26 +108,10 @@ public final class VentanaCategorias extends JDialog {
         setLocationRelativeTo(propietario);
     }
 
-    private JPanel crearFormulario() {
-        JLabel etiquetaNombre = new JLabel("Nombre:");
-        etiquetaNombre.setLabelFor(campoNombre);
-
-        JPanel campo = new JPanel(new BorderLayout(12, 0));
-        campo.add(etiquetaNombre, BorderLayout.WEST);
-        campo.add(campoNombre, BorderLayout.CENTER);
-
-        JPanel formulario = new JPanel(new BorderLayout(0, 12));
-        formulario.add(new JLabel(
-                "Seleccione una categoría para editarla, o pulse Nuevo."
-        ), BorderLayout.NORTH);
-        formulario.add(campo, BorderLayout.CENTER);
-        return formulario;
-    }
-
     private JPanel crearPie() {
         JPanel acciones = new JPanel(new GridLayout(1, 5, 8, 0));
         acciones.add(botonNuevo);
-        acciones.add(botonGuardar);
+        acciones.add(botonEditar);
         acciones.add(botonEliminar);
         acciones.add(botonRecargar);
         acciones.add(botonCerrar);
@@ -115,52 +122,52 @@ public final class VentanaCategorias extends JDialog {
         return pie;
     }
 
-    public String getNombre() {
-        return campoNombre.getText();
-    }
-
-    public int getIdSeleccionado() {
+    public Categoria getCategoriaSeleccionada() {
         int fila = tabla.getSelectedRow();
-        if (fila < 0) {
-            return 0;
+
+        if (fila < 0 || fila >= tabla.getRowCount()) {
+            return null;
         }
-        int filaModelo = tabla.convertRowIndexToModel(fila);
-        return ((Number) modeloTabla.getValueAt(filaModelo, 0)).intValue();
+
+        int indice = tabla.convertRowIndexToModel(fila);
+        return indice >= 0 && indice < categorias.size()
+                ? categorias.get(indice) : null;
     }
 
-    public void mostrarNombreSeleccionado() {
-        int fila = tabla.getSelectedRow();
-        if (fila < 0) {
-            campoNombre.setText("");
-            return;
-        }
-        int filaModelo = tabla.convertRowIndexToModel(fila);
-        campoNombre.setText((String) modeloTabla.getValueAt(filaModelo, 1));
-    }
+    public void mostrarCategorias(List<Categoria> datos) {
+        List<Categoria> nuevasCategorias = List.copyOf(datos);
 
-    public void mostrarCategorias(List<Categoria> categorias) {
-        limpiarFormulario();
+        limpiarSeleccion();
+        categorias = nuevasCategorias;
         modeloTabla.setRowCount(0);
+
         for (Categoria categoria : categorias) {
-            modeloTabla.addRow(new Object[]{categoria.getId(), categoria.getNombre()});
+            modeloTabla.addRow(new Object[]{
+                    categoria.getId(), categoria.getNombre()
+            });
         }
+
+        actualizarControles();
     }
 
-    public void limpiarFormulario() {
+    public void limpiarSeleccion() {
         tabla.clearSelection();
-        campoNombre.setText("");
+        tabla.getSelectionModel().setAnchorSelectionIndex(-1);
+        tabla.getSelectionModel().setLeadSelectionIndex(-1);
     }
 
-    public void enfocarNombre() {
-        campoNombre.requestFocusInWindow();
+    public void enfocarTabla() {
+        if (!ocupada) {
+            tabla.requestFocusInWindow();
+        }
     }
 
     public void alNuevo(ActionListener accion) {
         botonNuevo.addActionListener(accion);
     }
 
-    public void alGuardar(ActionListener accion) {
-        botonGuardar.addActionListener(accion);
+    public void alEditar(ActionListener accion) {
+        botonEditar.addActionListener(accion);
     }
 
     public void alEliminar(ActionListener accion) {
@@ -181,6 +188,7 @@ public final class VentanaCategorias extends JDialog {
 
     public void alCerrar(Runnable accion) {
         botonCerrar.addActionListener(evento -> accion.run());
+
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent evento) {
@@ -197,18 +205,20 @@ public final class VentanaCategorias extends JDialog {
         this.ocupada = ocupada;
         etiquetaEstado.setText(mensaje);
         actualizarControles();
+
         setCursor(Cursor.getPredefinedCursor(
                 ocupada ? Cursor.WAIT_CURSOR : Cursor.DEFAULT_CURSOR
         ));
     }
 
     private void actualizarControles() {
-        campoNombre.setEnabled(!ocupada);
+        boolean seleccionado = getCategoriaSeleccionada() != null;
+
         tabla.setEnabled(!ocupada);
         tabla.getTableHeader().setEnabled(!ocupada);
         botonNuevo.setEnabled(!ocupada);
-        botonGuardar.setEnabled(!ocupada);
-        botonEliminar.setEnabled(!ocupada && getIdSeleccionado() > 0);
+        botonEditar.setEnabled(!ocupada && seleccionado);
+        botonEliminar.setEnabled(!ocupada && seleccionado);
         botonRecargar.setEnabled(!ocupada);
         botonCerrar.setEnabled(!ocupada);
     }
