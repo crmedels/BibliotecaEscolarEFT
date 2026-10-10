@@ -3,7 +3,9 @@ package cl.biblioteca.controlador;
 import cl.biblioteca.modelo.Estudiante;
 import cl.biblioteca.modelo.SesionUsuario;
 import cl.biblioteca.servicio.EstudianteServicio;
+import cl.biblioteca.util.ManejadorErrores;
 import cl.biblioteca.util.TareaBD;
+import cl.biblioteca.vista.DialogoEstudiante;
 import cl.biblioteca.vista.VentanaEstudiantes;
 
 import javax.swing.JOptionPane;
@@ -13,25 +15,29 @@ import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 
 /**
- * Coordina la gestión de estudiantes y sus cuentas de acceso en segundo plano.
+ * Coordina el listado, el formulario y las cuentas de estudiantes en segundo plano.
  */
 public final class ControladorEstudiantes {
 
     private static final String ESTADO_INICIAL =
-            "Seleccione un estudiante para editarlo, o pulse Nuevo.";
+            "Pulse Nuevo estudiante o seleccione uno para editarlo.";
 
     private final VentanaEstudiantes ventana;
     private final EstudianteServicio servicio;
+
     private String estado = ESTADO_INICIAL;
     private String mensajeCambioPendiente;
 
     public ControladorEstudiantes(VentanaEstudiantes ventana, SesionUsuario sesion) {
-        this.ventana = Objects.requireNonNull(ventana, "La ventana es obligatoria.");
+        this.ventana = Objects.requireNonNull(
+                ventana, "La ventana es obligatoria."
+        );
+
         servicio = new EstudianteServicio(sesion);
         sesion.exigirAdministracion();
 
-        ventana.alNuevo(evento -> nuevo());
-        ventana.alGuardar(evento -> guardar());
+        ventana.alNuevo(evento -> abrirFormulario(null));
+        ventana.alEditar(evento -> editar());
         ventana.alEliminar(evento -> eliminar());
         ventana.alRecargar(evento -> cargarEstudiantes("Listado actualizado."));
         ventana.alSeleccionar(this::seleccionarEstudiante);
@@ -47,15 +53,43 @@ public final class ControladorEstudiantes {
         ventana.setVisible(true);
     }
 
-    private void nuevo() {
+    private void editar() {
         if (!estaDisponible()) {
             return;
         }
 
-        ventana.limpiarFormulario();
-        estado = "Complete la ficha y una contraseña para crear el acceso del estudiante.";
-        ventana.establecerOcupada(false, estado);
-        ventana.enfocarNombre();
+        Estudiante seleccionado = ventana.getEstudianteSeleccionado();
+
+        if (seleccionado != null) {
+            abrirFormulario(seleccionado);
+        }
+    }
+
+    private void abrirFormulario(Estudiante estudiante) {
+        if (!estaDisponible()) {
+            return;
+        }
+
+        DialogoEstudiante dialogo = null;
+        ventana.establecerOcupada(true, "Formulario de estudiante abierto.");
+
+        try {
+            dialogo = new DialogoEstudiante(ventana, estudiante);
+
+            DialogoEstudiante formulario = dialogo;
+            formulario.alGuardar(evento -> guardar(formulario));
+            formulario.setVisible(true);
+
+        } catch (RuntimeException e) {
+            ManejadorErrores.mostrar(ventana, e);
+
+        } finally {
+            if (dialogo != null) {
+                dialogo.dispose();
+            }
+
+            finalizarTarea();
+        }
     }
 
     private void seleccionarEstudiante() {
@@ -63,36 +97,69 @@ public final class ControladorEstudiantes {
             return;
         }
 
-        ventana.mostrarEstudianteSeleccionado();
-        estado = ventana.getEstudianteSeleccionado() == null ? ESTADO_INICIAL
-                : "Edite la ficha. Una contraseña vacía conserva la actual.";
+        estado = ventana.getEstudianteSeleccionado() == null
+                ? ESTADO_INICIAL
+                : "Pulse Editar estudiante para modificar la ficha seleccionada.";
+
         ventana.establecerOcupada(false, estado);
     }
 
-    private void guardar() {
-        if (!estaDisponible()) {
+    private void guardar(DialogoEstudiante formulario) {
+        if (!formulario.isDisplayable() || formulario.estaOcupada()) {
             return;
         }
 
-        Estudiante seleccionado = ventana.getEstudianteSeleccionado();
-        int id = seleccionado == null ? 0 : seleccionado.getId();
+        int id = formulario.getIdEstudiante();
 
         Estudiante datos = new Estudiante(
-                id, ventana.getNombre(), ventana.getRut(),
-                ventana.getCurso(), ventana.getCorreo()
+                id,
+                formulario.getNombre(),
+                formulario.getRut(),
+                formulario.getCurso(),
+                formulario.getCorreo()
         );
 
-        char[] caracteres = ventana.getContrasena();
+        char[] caracteres = formulario.getContrasena();
         String contrasena = new String(caracteres);
         Arrays.fill(caracteres, '\0');
 
-        ejecutarCambio(
-                "Guardando estudiante...",
-                () -> id > 0
-                        ? servicio.actualizar(datos, contrasena)
-                        : servicio.guardar(datos, contrasena),
-                id > 0 ? "Estudiante actualizado." : "Estudiante y cuenta creados."
-        );
+        formulario.establecerOcupada(true, "Guardando estudiante...");
+
+        try {
+            new TareaBD<Estudiante>(
+                    formulario,
+                    () -> id > 0
+                            ? servicio.actualizar(datos, contrasena)
+                            : servicio.guardar(datos, contrasena),
+                    resultado -> {
+                        String mensaje = id > 0
+                                ? "Estudiante actualizado."
+                                : "Estudiante y cuenta creados.";
+
+                        estado = mensaje
+                                + " Pulse Recargar para actualizar el listado.";
+
+                        mensajeCambioPendiente = mensaje;
+                        formulario.dispose();
+                    },
+                    () -> finalizarGuardado(formulario)
+            ).execute();
+
+        } catch (RuntimeException e) {
+            ManejadorErrores.mostrar(formulario, e);
+            finalizarGuardado(formulario);
+        }
+    }
+
+    private void finalizarGuardado(DialogoEstudiante formulario) {
+        if (formulario.isDisplayable()) {
+            formulario.establecerOcupada(
+                    false,
+                    "Revise los datos e intente guardar nuevamente."
+            );
+
+            formulario.enfocarNombre();
+        }
     }
 
     private void eliminar() {
@@ -101,9 +168,11 @@ public final class ControladorEstudiantes {
         }
 
         Estudiante seleccionado = ventana.getEstudianteSeleccionado();
+
         if (seleccionado == null) {
             return;
         }
+
         int id = seleccionado.getId();
 
         int respuesta = JOptionPane.showConfirmDialog(
@@ -134,7 +203,9 @@ public final class ControladorEstudiantes {
                 servicio::listar,
                 estudiantes -> {
                     ventana.mostrarEstudiantes(estudiantes);
-                    estado = mensajeExito + " Estudiantes: " + estudiantes.size() + ".";
+
+                    estado = mensajeExito
+                            + " Estudiantes: " + estudiantes.size() + ".";
                 }
         );
     }
@@ -148,9 +219,11 @@ public final class ControladorEstudiantes {
                     return null;
                 },
                 resultado -> {
-                    ventana.limpiarFormulario();
-                    estado = mensajeExito + " Pulse Recargar para actualizar el listado.";
+                    estado = mensajeExito
+                            + " Pulse Recargar para actualizar el listado.";
+
                     mensajeCambioPendiente = mensajeExito;
+                    ventana.limpiarSeleccion();
                 }
         );
     }
@@ -162,16 +235,23 @@ public final class ControladorEstudiantes {
         }
 
         ventana.establecerOcupada(true, mensaje);
-        new TareaBD<T>(
-                ventana,
-                operacion,
-                resultado -> {
-                    if (ventana.isDisplayable()) {
-                        alCompletar.accept(resultado);
-                    }
-                },
-                this::finalizarTarea
-        ).execute();
+
+        try {
+            new TareaBD<T>(
+                    ventana,
+                    operacion,
+                    resultado -> {
+                        if (ventana.isDisplayable()) {
+                            alCompletar.accept(resultado);
+                        }
+                    },
+                    this::finalizarTarea
+            ).execute();
+
+        } catch (RuntimeException e) {
+            ManejadorErrores.mostrar(ventana, e);
+            finalizarTarea();
+        }
     }
 
     private void finalizarTarea() {
@@ -187,13 +267,12 @@ public final class ControladorEstudiantes {
         if (mensajePendiente != null) {
             cargarEstudiantes(mensajePendiente);
         } else {
-            ventana.enfocarNombre();
+            ventana.enfocarTabla();
         }
     }
 
     private void cerrar() {
         if (estaDisponible()) {
-            ventana.limpiarContrasena();
             ventana.dispose();
         }
     }
