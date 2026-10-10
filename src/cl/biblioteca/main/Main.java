@@ -53,7 +53,7 @@ public final class Main {
     private static void mostrarPrincipal(SesionUsuario sesion) {
         VentanaPrincipal ventana = new VentanaPrincipal(sesion);
         ControladorPrincipal controlador = new ControladorPrincipal(
-                ventana, Main::mostrarLogin
+                ventana, sesion, Main::mostrarLogin
         );
         controlador.mostrar();
     }
